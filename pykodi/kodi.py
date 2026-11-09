@@ -607,7 +607,7 @@ class Kodi:
             filter["albumid"] = album_id
 
         return await self._server.AudioLibrary.GetAlbums(
-            **_build_query(filter=filter, properties=properties)
+            **_build_query(filter=filter or None, properties=properties)
         )
 
     async def get_album_details(self, album_id, properties=None):
@@ -625,7 +625,7 @@ class Kodi:
             filter["albumid"] = album_id
 
         return await self._server.AudioLibrary.GetSongs(
-            **_build_query(filter=filter, properties=properties)
+            **_build_query(filter=filter or None, properties=properties)
         )
 
     async def get_movies(self, properties=None):

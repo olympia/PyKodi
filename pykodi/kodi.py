@@ -654,10 +654,13 @@ class Kodi:
 
     async def get_episodes(self, tv_show_id, season_id, properties=None):
         """Get episodes list."""
-
-        return await self._server.VideoLibrary.GetEpisodes(
-            **_build_query(tvshowid=tv_show_id, season=season_id, properties=properties)
+        params = _build_query(
+            tvshowid=tv_show_id, season=season_id, properties=properties
         )
+        if type(season_id) is int and season_id == 0:
+            params["season"] = 0
+
+        return await self._server.VideoLibrary.GetEpisodes(**params)
 
     async def get_tv_shows(self, properties=None):
         """Get tv shows list."""
@@ -692,12 +695,7 @@ class Kodi:
 
 def _build_query(**kwargs):
     """Build query."""
-    query = {}
-    for key, val in kwargs.items():
-        if val:
-            query.update({key: val})
-
-    return query
+    return {key: val for key, val in kwargs.items() if val}
 
 
 class CannotConnectError(Exception):

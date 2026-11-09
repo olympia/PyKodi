@@ -31,6 +31,22 @@ def test_get_episodes_sends_season_zero() -> None:
     assert calls == [{"tvshowid": 1, "season": 0}]
 
 
+def test_get_episodes_keeps_season_zero_but_omits_other_falsey_params() -> None:
+    kodi, calls = recording_kodi()
+
+    asyncio.run(kodi.get_episodes(tv_show_id=0, season_id=0, properties=[]))
+
+    assert calls == [{"season": 0}]
+
+
+def test_get_episodes_does_not_treat_false_as_season_zero() -> None:
+    kodi, calls = recording_kodi()
+
+    asyncio.run(kodi.get_episodes(tv_show_id=1, season_id=False, properties=[]))
+
+    assert calls == [{"tvshowid": 1}]
+
+
 @pytest.mark.parametrize("method", ["get_albums", "get_songs"])
 def test_unfiltered_library_query_omits_filter(method: str) -> None:
     kodi, calls = recording_kodi()

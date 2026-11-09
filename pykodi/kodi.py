@@ -607,7 +607,7 @@ class Kodi:
             filter["albumid"] = album_id
 
         return await self._server.AudioLibrary.GetAlbums(
-            **_build_query(filter=filter or None, properties=properties)
+            **_build_query(filter=filter, properties=properties)
         )
 
     async def get_album_details(self, album_id, properties=None):
@@ -625,7 +625,7 @@ class Kodi:
             filter["albumid"] = album_id
 
         return await self._server.AudioLibrary.GetSongs(
-            **_build_query(filter=filter or None, properties=properties)
+            **_build_query(filter=filter, properties=properties)
         )
 
     async def get_movies(self, properties=None):
@@ -654,10 +654,13 @@ class Kodi:
 
     async def get_episodes(self, tv_show_id, season_id, properties=None):
         """Get episodes list."""
-
-        return await self._server.VideoLibrary.GetEpisodes(
-            **_build_query(tvshowid=tv_show_id, season=season_id, properties=properties)
+        params = _build_query(
+            tvshowid=tv_show_id, season=season_id, properties=properties
         )
+        if type(season_id) is int and season_id == 0:
+            params["season"] = 0
+
+        return await self._server.VideoLibrary.GetEpisodes(**params)
 
     async def get_tv_shows(self, properties=None):
         """Get tv shows list."""
@@ -692,7 +695,7 @@ class Kodi:
 
 def _build_query(**kwargs):
     """Build query."""
-    return {key: val for key, val in kwargs.items() if val is not None}
+    return {key: val for key, val in kwargs.items() if val}
 
 
 class CannotConnectError(Exception):

@@ -121,13 +121,7 @@ class KodiConnection:
         session: Optional[aiohttp.ClientSession],
     ) -> None:
         """Initialize the object."""
-        self._session = session
-        self._created_session = False
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
-            self._created_session = True
-
-        self._kwargs: Dict[str, Any] = {"timeout": timeout, "session": self._session}
+        self._kwargs: Dict[str, Any] = {"timeout": timeout, "session": session}
 
         if username is not None:
             if password is None:
@@ -149,10 +143,7 @@ class KodiConnection:
 
     async def close(self) -> None:
         """Close the connection."""
-        if self._created_session and self._session is not None:
-            await self._session.close()
-            self._session = None
-            self._created_session = False
+        pass
 
     @property
     def server(self) -> Any:
@@ -205,6 +196,10 @@ class KodiHTTPConnection(KodiConnection):
         session: Optional[aiohttp.ClientSession],
     ) -> None:
         """Initialize the object."""
+        self._created_session = session is None
+        if session is None:
+            session = aiohttp.ClientSession()
+        self._session: Optional[aiohttp.ClientSession] = session
         super().__init__(host, port, username, password, ssl, timeout, session)
 
         http_protocol = "https" if ssl else "http"
@@ -221,7 +216,10 @@ class KodiHTTPConnection(KodiConnection):
     async def close(self) -> None:
         """Close the connection."""
         self._http_server = None
-        await super().close()
+        if self._created_session and self._session is not None:
+            await self._session.close()
+            self._session = None
+            self._created_session = False
 
     @property
     def server(self) -> Any:
@@ -451,7 +449,6 @@ class KodiWSConnection(KodiConnection):
             handshake.cancel()
             await asyncio.wait([handshake], timeout=self._timeout)
         await self._close_websocket_bounded(self._ws_task)
-        await super().close()
 
     async def _close_websocket_bounded(
         self, task: Optional["asyncio.Task[None]"]

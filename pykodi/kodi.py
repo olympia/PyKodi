@@ -366,7 +366,8 @@ class KodiWSConnection(KodiConnection):
         """
         close_count = self._close_count
         task = await self._ws_server.ws_connect()
-        # Store the read loop before anything else can run, so close() sees it
+        # Store the read loop for close(). With an eager task factory it can
+        # already run inside ws_connect(), before this line.
         self._ws_task = task
         callback = functools.partial(self._loop_done, close_count)
         task.add_done_callback(callback)

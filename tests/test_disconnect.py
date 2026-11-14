@@ -282,8 +282,8 @@ def test_no_callback_on_close_from_a_notification_handler(eager: bool) -> None:
 
     async def run() -> None:
         if eager:
-            # Home Assistant runs with eager tasks, then the read loop starts
-            # and handles the notification before connect() returns
+            # With an eager task factory the read loop starts, and handles
+            # the notification, before connect() returns
             asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory)
         runner = await start_kodi([send_quit])
         try:

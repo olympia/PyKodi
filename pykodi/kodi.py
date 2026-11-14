@@ -488,37 +488,47 @@ def _ws_loop_done(task: "asyncio.Task[None]") -> None:
 class Kodi:
     """A high level Kodi interface."""
 
-    def __init__(self, connection):
+    def __init__(self, connection: KodiConnection) -> None:
         """Initialize the object."""
         self._conn = connection
         self._server = connection.server
 
-    async def ping(self):
+    async def ping(self) -> bool:
         """Ping the server."""
         try:
             response = await self._server.JSONRPC.Ping()
-            return response == "pong"
+            return cast(bool, response == "pong")
         except jsonrpc_base.jsonrpc.TransportError as error:
             if "401" in str(error):
                 raise InvalidAuthError from error
             else:
                 raise CannotConnectError from error
 
-    async def get_application_properties(self, properties):
+    async def get_application_properties(self, properties: List[str]) -> Dict[str, Any]:
         """Get value of given properties."""
-        return await self._server.Application.GetProperties(properties)
+        return cast(
+            Dict[str, Any], await self._server.Application.GetProperties(properties)
+        )
 
-    async def get_player_properties(self, player, properties):
+    async def get_player_properties(
+        self, player: Dict[str, Any], properties: List[str]
+    ) -> Dict[str, Any]:
         """Get value of given properties."""
-        return await self._server.Player.GetProperties(player["playerid"], properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.Player.GetProperties(player["playerid"], properties),
+        )
 
-    async def get_playing_item_properties(self, player, properties):
+    async def get_playing_item_properties(
+        self, player: Dict[str, Any], properties: List[str]
+    ) -> Dict[str, Any]:
         """Get value of given properties."""
-        return (await self._server.Player.GetItem(player["playerid"], properties))[
-            "item"
-        ]
+        return cast(
+            Dict[str, Any],
+            (await self._server.Player.GetItem(player["playerid"], properties))["item"],
+        )
 
-    async def get_stream_info(self, player):
+    async def get_stream_info(self, player: Dict[str, Any]) -> Dict[str, Any]:
         """Get the video and audio streams, HDR and display details.
 
         Returns the stream properties of the player, the raw HDR, resolution
@@ -540,50 +550,50 @@ class Kodi:
         ]
         info["infolabels"] = labels
         info["hdrhints"] = _hdr_hints(labels.get("Player.Filename"))
-        return info
+        return cast(Dict[str, Any], info)
 
-    async def volume_up(self):
+    async def volume_up(self) -> None:
         """Send volume up command."""
         await self._server.Input.ExecuteAction("volumeup")
 
-    async def volume_down(self):
+    async def volume_down(self) -> None:
         """Send volume down command."""
         await self._server.Input.ExecuteAction("volumedown")
 
-    async def set_volume_level(self, volume):
+    async def set_volume_level(self, volume: Union[int, str]) -> None:
         """Set volume level, range 0-100."""
         await self._server.Application.SetVolume(volume)
 
-    async def mute(self, mute):
+    async def mute(self, mute: Union[bool, str]) -> None:
         """Send (un)mute command."""
         await self._server.Application.SetMute(mute)
 
-    async def _set_play_state(self, state):
+    async def _set_play_state(self, state: Union[bool, str]) -> None:
         players = await self.get_players()
 
         if players:
             await self._server.Player.PlayPause(players[0]["playerid"], state)
 
-    async def play_pause(self):
+    async def play_pause(self) -> None:
         """Send toggle command command."""
         await self._set_play_state("toggle")
 
-    async def play(self):
+    async def play(self) -> None:
         """Send play command."""
         await self._set_play_state(True)
 
-    async def pause(self):
+    async def pause(self) -> None:
         """Send pause command."""
         await self._set_play_state(False)
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Send stop command."""
         players = await self.get_players()
 
         if players:
             await self._server.Player.Stop(players[0]["playerid"])
 
-    async def _goto(self, direction):
+    async def _goto(self, direction: str) -> None:
         players = await self.get_players()
 
         if players:
@@ -596,15 +606,15 @@ class Kodi:
 
             await self._server.Player.GoTo(players[0]["playerid"], direction)
 
-    async def next_track(self):
+    async def next_track(self) -> None:
         """Send next track command."""
         await self._goto("next")
 
-    async def previous_track(self):
+    async def previous_track(self) -> None:
         """Send previous track command."""
         await self._goto("previous")
 
-    async def media_seek(self, position):
+    async def media_seek(self, position: float) -> None:
         """Send seek command."""
         players = await self.get_players()
 
@@ -623,26 +633,26 @@ class Kodi:
         if players:
             await self._server.Player.Seek(players[0]["playerid"], {"time": time})
 
-    async def play_item(self, item):
+    async def play_item(self, item: Dict[str, Any]) -> None:
         await self._server.Player.Open(**{"item": item})
 
-    async def play_channel(self, channel_id):
+    async def play_channel(self, channel_id: int) -> None:
         """Play the given channel."""
         await self.play_item({"channelid": channel_id})
 
-    async def play_playlist(self, playlist_id):
+    async def play_playlist(self, playlist_id: int) -> None:
         """Play the given playlist."""
         await self.play_item({"playlistid": playlist_id})
 
-    async def play_directory(self, directory):
+    async def play_directory(self, directory: str) -> None:
         """Play the given directory."""
         await self.play_item({"directory": directory})
 
-    async def play_file(self, file):
+    async def play_file(self, file: str) -> None:
         """Play the given file."""
         await self.play_item({"file": file})
 
-    async def set_shuffle(self, shuffle):
+    async def set_shuffle(self, shuffle: Union[bool, str]) -> None:
         """Set shuffle mode, for the first player."""
         players = await self.get_players()
         if players:
@@ -650,98 +660,154 @@ class Kodi:
                 **{"playerid": players[0]["playerid"], "shuffle": shuffle}
             )
 
-    async def call_method(self, method, **kwargs):
+    async def call_method(self, method: str, **kwargs: Any) -> Any:
         """Run Kodi JSONRPC API method with params."""
         if "." not in method or len(method.split(".")) != 2:
             raise ValueError(f"Invalid method: {method}")
         return await getattr(self._server, method)(**kwargs)
 
-    async def _add_item_to_playlist(self, item):
+    async def _add_item_to_playlist(self, item: Dict[str, Any]) -> None:
         await self._server.Playlist.Add(**{"playlistid": 0, "item": item})
 
-    async def add_song_to_playlist(self, song_id):
+    async def add_song_to_playlist(self, song_id: int) -> None:
         """Add song to default playlist (i.e. playlistid=0)."""
         await self._add_item_to_playlist({"songid": song_id})
 
-    async def add_album_to_playlist(self, album_id):
+    async def add_album_to_playlist(self, album_id: int) -> None:
         """Add album to default playlist (i.e. playlistid=0)."""
         await self._add_item_to_playlist({"albumid": album_id})
 
-    async def add_artist_to_playlist(self, artist_id):
+    async def add_artist_to_playlist(self, artist_id: int) -> None:
         """Add album to default playlist (i.e. playlistid=0)."""
         await self._add_item_to_playlist({"artistid": artist_id})
 
-    async def clear_playlist(self):
+    async def clear_playlist(self) -> None:
         """Clear default playlist (i.e. playlistid=0)."""
         await self._server.Playlist.Clear(**{"playlistid": 0})
 
-    async def get_artists(self, properties=None):
+    async def get_artists(
+        self, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get artists list."""
-        return await self._server.AudioLibrary.GetArtists(
-            **_build_query(properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.AudioLibrary.GetArtists(
+                **_build_query(properties=properties)
+            ),
         )
 
-    async def get_artist_details(self, artist_id=None, properties=None):
+    async def get_artist_details(
+        self, artist_id: Optional[int] = None, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get artist details."""
-        return await self._server.AudioLibrary.GetArtistDetails(
-            **_build_query(artistid=artist_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.AudioLibrary.GetArtistDetails(
+                **_build_query(artistid=artist_id, properties=properties)
+            ),
         )
 
-    async def get_albums(self, artist_id=None, album_id=None, properties=None):
+    async def get_albums(
+        self,
+        artist_id: Optional[int] = None,
+        album_id: Optional[int] = None,
+        properties: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Get albums list."""
-        filter = {}
+        filter: Dict[str, int] = {}
         if artist_id:
             filter["artistid"] = artist_id
         if album_id:
             filter["albumid"] = album_id
 
-        return await self._server.AudioLibrary.GetAlbums(
-            **_build_query(filter=filter, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.AudioLibrary.GetAlbums(
+                **_build_query(filter=filter, properties=properties)
+            ),
         )
 
-    async def get_album_details(self, album_id, properties=None):
+    async def get_album_details(
+        self, album_id: int, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get album details."""
-        return await self._server.AudioLibrary.GetAlbumDetails(
-            **_build_query(albumid=album_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.AudioLibrary.GetAlbumDetails(
+                **_build_query(albumid=album_id, properties=properties)
+            ),
         )
 
-    async def get_songs(self, artist_id=None, album_id=None, properties=None):
+    async def get_songs(
+        self,
+        artist_id: Optional[int] = None,
+        album_id: Optional[int] = None,
+        properties: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Get songs list."""
-        filter = {}
+        filter: Dict[str, int] = {}
         if artist_id:
             filter["artistid"] = artist_id
         if album_id:
             filter["albumid"] = album_id
 
-        return await self._server.AudioLibrary.GetSongs(
-            **_build_query(filter=filter, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.AudioLibrary.GetSongs(
+                **_build_query(filter=filter, properties=properties)
+            ),
         )
 
-    async def get_movies(self, properties=None):
+    async def get_movies(
+        self, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get movies list."""
-        return await self._server.VideoLibrary.GetMovies(
-            **_build_query(properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetMovies(
+                **_build_query(properties=properties)
+            ),
         )
 
-    async def get_movie_details(self, movie_id, properties=None):
+    async def get_movie_details(
+        self, movie_id: int, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get movie details."""
-        return await self._server.VideoLibrary.GetMovieDetails(
-            **_build_query(movieid=movie_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetMovieDetails(
+                **_build_query(movieid=movie_id, properties=properties)
+            ),
         )
 
-    async def get_seasons(self, tv_show_id, properties=None):
+    async def get_seasons(
+        self, tv_show_id: Optional[int], properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get seasons list."""
-        return await self._server.VideoLibrary.GetSeasons(
-            **_build_query(tvshowid=tv_show_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetSeasons(
+                **_build_query(tvshowid=tv_show_id, properties=properties)
+            ),
         )
 
-    async def get_season_details(self, season_id, properties=None):
+    async def get_season_details(
+        self, season_id: int, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get songs list."""
-        return await self._server.VideoLibrary.GetSeasonDetails(
-            **_build_query(seasonid=season_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetSeasonDetails(
+                **_build_query(seasonid=season_id, properties=properties)
+            ),
         )
 
-    async def get_episodes(self, tv_show_id, season_id, properties=None):
+    async def get_episodes(
+        self,
+        tv_show_id: Optional[int],
+        season_id: Optional[int],
+        properties: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Get episodes list."""
         params = _build_query(
             tvshowid=tv_show_id, season=season_id, properties=properties
@@ -749,35 +815,58 @@ class Kodi:
         if type(season_id) is int and season_id == 0:
             params["season"] = 0
 
-        return await self._server.VideoLibrary.GetEpisodes(**params)
+        return cast(
+            Dict[str, Any], await self._server.VideoLibrary.GetEpisodes(**params)
+        )
 
-    async def get_tv_shows(self, properties=None):
+    async def get_tv_shows(
+        self, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get tv shows list."""
-        return await self._server.VideoLibrary.GetTVShows(
-            **_build_query(properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetTVShows(
+                **_build_query(properties=properties)
+            ),
         )
 
-    async def get_tv_show_details(self, tv_show_id=None, properties=None):
+    async def get_tv_show_details(
+        self, tv_show_id: Optional[int] = None, properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get songs list."""
-        return await self._server.VideoLibrary.GetTVShowDetails(
-            **_build_query(tvshowid=tv_show_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.VideoLibrary.GetTVShowDetails(
+                **_build_query(tvshowid=tv_show_id, properties=properties)
+            ),
         )
 
-    async def get_channels(self, channel_group_id, properties=None):
+    async def get_channels(
+        self, channel_group_id: Union[int, str], properties: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get channels list."""
-        return await self._server.PVR.GetChannels(
-            **_build_query(channelgroupid=channel_group_id, properties=properties)
+        return cast(
+            Dict[str, Any],
+            await self._server.PVR.GetChannels(
+                **_build_query(channelgroupid=channel_group_id, properties=properties)
+            ),
         )
 
-    async def get_players(self):
+    async def get_players(self) -> List[Dict[str, Any]]:
         """Return the active player objects."""
-        return await self._server.Player.GetActivePlayers()
+        return cast(List[Dict[str, Any]], await self._server.Player.GetActivePlayers())
 
-    async def send_notification(self, title, message, icon="info", displaytime=10000):
+    async def send_notification(
+        self,
+        title: str,
+        message: str,
+        icon: str = "info",
+        displaytime: int = 10000,
+    ) -> None:
         """Display on-screen message."""
         await self._server.GUI.ShowNotification(title, message, icon, displaytime)
 
-    def thumbnail_url(self, thumbnail):
+    def thumbnail_url(self, thumbnail: Optional[str]) -> Optional[str]:
         """Get the URL for a thumbnail."""
         return self._conn.thumbnail_url(thumbnail)
 

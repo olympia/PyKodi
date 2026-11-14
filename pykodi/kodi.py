@@ -7,7 +7,7 @@ import base64
 import functools
 import inspect
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Union, cast
 import jsonrpc_base
 import jsonrpc_async
 import jsonrpc_websocket
@@ -50,7 +50,7 @@ _HDR_HINTS = tuple(
 )
 
 
-def _hdr_hints(filename):
+def _hdr_hints(filename: Optional[str]) -> List[str]:
     """Return the HDR formats named in a file name.
 
     Kodi 21 reports HDR10+ as hdr10 and does not report the HDR10 base layer
@@ -67,8 +67,15 @@ DisconnectCallback = Callable[[Optional[BaseException]], Any]
 
 
 def get_kodi_connection(
-    host, port, ws_port, username, password, ssl=False, timeout=5, session=None
-):
+    host: str,
+    port: int,
+    ws_port: Optional[int],
+    username: Optional[str],
+    password: Optional[str],
+    ssl: bool = False,
+    timeout: Optional[float] = 5,
+    session: Optional[aiohttp.ClientSession] = None,
+) -> Union["KodiHTTPConnection", "KodiWSConnection"]:
     """Returns a Kodi connection."""
     if ws_port is None:
         return KodiHTTPConnection(host, port, username, password, ssl, timeout, session)
@@ -78,7 +85,7 @@ def get_kodi_connection(
         )
 
 
-def _url_host(host):
+def _url_host(host: str) -> str:
     """Return a host formatted for use in a URL.
 
     Bare IPv6 literals must be bracketed in URLs (RFC 3986 section 3.2.2),
@@ -89,7 +96,7 @@ def _url_host(host):
     return host
 
 
-def _basic_auth_header(username, password):
+def _basic_auth_header(username: str, password: str) -> str:
     """Return the value of an HTTP Basic Authorization header.
 
     The credentials are encoded as UTF-8, which is how Kodi compares them.
@@ -103,7 +110,16 @@ def _basic_auth_header(username, password):
 class KodiConnection:
     """A connection to Kodi interface."""
 
-    def __init__(self, host, port, username, password, ssl, timeout, session):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: Optional[str],
+        password: Optional[str],
+        ssl: bool,
+        timeout: Optional[float],
+        session: Optional[aiohttp.ClientSession],
+    ) -> None:
         """Initialize the object."""
         self._session = session
         self._created_session = False
@@ -111,7 +127,7 @@ class KodiConnection:
             self._session = aiohttp.ClientSession()
             self._created_session = True
 
-        self._kwargs = {"timeout": timeout, "session": self._session}
+        self._kwargs: Dict[str, Any] = {"timeout": timeout, "session": self._session}
 
         if username is not None:
             if password is None:
@@ -127,11 +143,11 @@ class KodiConnection:
 
         self._image_url = f"{http_protocol}://{image_auth_string}{_url_host(host)}:{port}/image"
 
-    async def connect(self):
+    async def connect(self) -> None:
         """Connect to kodi."""
         pass
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the connection."""
         if self._created_session and self._session is not None:
             await self._session.close()
@@ -139,16 +155,16 @@ class KodiConnection:
             self._created_session = False
 
     @property
-    def server(self):
+    def server(self) -> Any:
         raise NotImplementedError
 
     @property
-    def connected(self):
+    def connected(self) -> bool:
         """Is the server connected."""
         raise NotImplementedError
 
     @property
-    def can_subscribe(self):
+    def can_subscribe(self) -> bool:
         return False
 
     def subscribe(
@@ -164,7 +180,7 @@ class KodiConnection:
         """
         raise NotImplementedError("This connection does not stay open")
 
-    def thumbnail_url(self, thumbnail):
+    def thumbnail_url(self, thumbnail: Optional[str]) -> Optional[str]:
         """Get the URL for a thumbnail."""
         if thumbnail is None:
             return None
@@ -172,12 +188,22 @@ class KodiConnection:
         url_components = urllib.parse.urlparse(thumbnail)
         if url_components.scheme == "image":
             return f"{self._image_url}/{urllib.parse.quote_plus(thumbnail)}"
+        return None
 
 
 class KodiHTTPConnection(KodiConnection):
     """An HTTP connection to Kodi."""
 
-    def __init__(self, host, port, username, password, ssl, timeout, session):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: Optional[str],
+        password: Optional[str],
+        ssl: bool,
+        timeout: Optional[float],
+        session: Optional[aiohttp.ClientSession],
+    ) -> None:
         """Initialize the object."""
         super().__init__(host, port, username, password, ssl, timeout, session)
 
@@ -188,17 +214,17 @@ class KodiHTTPConnection(KodiConnection):
         self._http_server = jsonrpc_async.Server(http_url, **self._kwargs)
 
     @property
-    def connected(self):
+    def connected(self) -> bool:
         """Is the server connected."""
         return True
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the connection."""
         self._http_server = None
         await super().close()
 
     @property
-    def server(self):
+    def server(self) -> Any:
         """Active server for json-rpc requests."""
         return self._http_server
 
@@ -206,7 +232,17 @@ class KodiHTTPConnection(KodiConnection):
 class KodiWSConnection(KodiConnection):
     """A WS connection to Kodi."""
 
-    def __init__(self, host, port, ws_port, username, password, ssl, timeout, session):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        ws_port: int,
+        username: Optional[str],
+        password: Optional[str],
+        ssl: bool,
+        timeout: Optional[float],
+        session: Optional[aiohttp.ClientSession],
+    ) -> None:
         """Initialize the object."""
         super().__init__(host, port, username, password, ssl, timeout, session)
 
@@ -228,12 +264,12 @@ class KodiWSConnection(KodiConnection):
         ] = None
 
     @property
-    def connected(self):
+    def connected(self) -> bool:
         """Return whether websocket is connected."""
-        return self._ws_server.connected
+        return cast(bool, self._ws_server.connected)
 
     @property
-    def can_subscribe(self):
+    def can_subscribe(self) -> bool:
         return True
 
     def subscribe(
@@ -306,7 +342,7 @@ class KodiWSConnection(KodiConnection):
 
         return remove
 
-    async def connect(self):
+    async def connect(self) -> None:
         """Connect to kodi over websocket.
 
         Concurrent calls open a single connection. If close() is called while
@@ -399,7 +435,7 @@ class KodiWSConnection(KodiConnection):
             except Exception:
                 _LOGGER.exception("Error in disconnect callback")
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the connection.
 
         Waits at most ``timeout`` seconds for the connection to close, then
@@ -435,7 +471,7 @@ class KodiWSConnection(KodiConnection):
             await asyncio.wait([task])
 
     @property
-    def server(self):
+    def server(self) -> Any:
         """Active server for json-rpc requests."""
         return self._ws_server
 
@@ -746,7 +782,7 @@ class Kodi:
         return self._conn.thumbnail_url(thumbnail)
 
 
-def _build_query(**kwargs):
+def _build_query(**kwargs: Any) -> Dict[str, Any]:
     """Build query."""
     return {key: val for key, val in kwargs.items() if val}
 

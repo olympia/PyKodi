@@ -9,7 +9,7 @@ You can install PyKodi from [PyPI](https://pypi.org/project/pykodi/):
 
     pip3 install pykodi
 
-Python 3.7 and above are supported.
+Python 3.11 and above are supported.
 
 
 ## How to use

@@ -12,7 +12,7 @@ DESCRIPTION = 'An async python interface for Kodi over JSON-RPC.'
 URL = 'https://github.com/xbmc/PyKodi'
 EMAIL = 'onfreund@gmail.com'
 AUTHOR = 'On Freund'
-REQUIRES_PYTHON = '>=3.7.0'
+REQUIRES_PYTHON = '>=3.11'
 VERSION = '0.3.0'
 
 REQUIRED = ['jsonrpc-async>=2.0.0', 'jsonrpc-websocket>=4.0.0', 'aiohttp']
@@ -68,7 +68,10 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: Python :: Implementation :: CPython',
         'Programming Language :: Python :: Implementation :: PyPy'
     ],

@@ -3,8 +3,9 @@
 import asyncio
 import base64
 import errno
+import re
 import socket
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Type
 from unittest.mock import MagicMock
 import warnings
 
@@ -17,6 +18,7 @@ from pykodi import (
     CannotConnectError,
     InvalidAuthError,
     Kodi,
+    ProtocolError,
     TransportError,
     get_kodi_connection,
 )
@@ -149,6 +151,7 @@ async def ping(
     port: int,
     raise_for_status: bool = False,
     resolver: Optional[AbstractResolver] = None,
+    request_timeout: float = 5,
 ) -> None:
     """Ping over HTTP with a new session."""
     async with aiohttp.ClientSession(
@@ -156,7 +159,13 @@ async def ping(
         raise_for_status=raise_for_status,
     ) as session:
         connection = get_kodi_connection(
-            host, port, None, "kodi", "secret", session=session
+            host,
+            port,
+            None,
+            "kodi",
+            "secret",
+            timeout=request_timeout,
+            session=session,
         )
         await Kodi(connection).ping()
 
@@ -242,3 +251,129 @@ def test_unknown_host_with_401() -> None:
     with pytest.raises(CannotConnectError) as error:
         asyncio.run(ping("kodi401.invalid", 8080, resolver=NoHosts()))
     assert "kodi401.invalid not found" in str(error.value.__cause__)
+
+
+def ping_with_raw_reply(reply: bytes, keep_open: bool, request_timeout: float) -> None:
+    """Ping a server that sends the given bytes as its whole reply."""
+
+    async def handle(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        head = await reader.readuntil(b"\r\n\r\n")
+        length = re.search(rb"(?im)^content-length: *(\d+)", head)
+        await reader.readexactly(int(length.group(1)) if length else 0)
+        writer.write(reply)
+        await writer.drain()
+        if keep_open:
+            await reader.read()
+        writer.close()
+
+    async def run() -> None:
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        try:
+            await ping(
+                "127.0.0.1",
+                server.sockets[0].getsockname()[1],
+                request_timeout=request_timeout,
+            )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("reply", "keep_open", "request_timeout", "wrapped"),
+    [
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n"
+            b"Content-Length: 5\r\n\r\nlogin",
+            False,
+            5,
+            aiohttp.ContentTypeError,
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 100\r\n\r\n{",
+            False,
+            5,
+            aiohttp.ClientPayloadError,
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 100\r\n\r\n{",
+            True,
+            2,
+            asyncio.TimeoutError,
+        ),
+    ],
+    ids=["html", "cut_off", "stalled"],
+)
+def test_http_unusable_reply(
+    reply: bytes, keep_open: bool, request_timeout: float, wrapped: Type[Exception]
+) -> None:
+    with pytest.raises(CannotConnectError) as error:
+        ping_with_raw_reply(reply, keep_open, request_timeout)
+    assert isinstance(error.value.__cause__, wrapped)
+
+
+def test_http_protocol_error_passes_through() -> None:
+    async def jsonrpc(request: web.Request) -> web.Response:
+        message = await request.json()
+        return web.json_response(
+            {
+                "jsonrpc": "2.0",
+                "id": message["id"],
+                "error": {"code": -32601, "message": "Method not found."},
+            }
+        )
+
+    async def run() -> None:
+        app = web.Application()
+        app.router.add_post("/jsonrpc", jsonrpc)
+        runner = await start_server(app)
+        try:
+            await ping("127.0.0.1", runner.addresses[0][1])
+        finally:
+            await runner.cleanup()
+
+    with pytest.raises(ProtocolError) as error:
+        asyncio.run(run())
+    assert error.value.args[0] == -32601
+
+
+def test_http_cancelled_ping() -> None:
+    async def run() -> None:
+        received = asyncio.Event()
+
+        async def handle(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            await reader.readuntil(b"\r\n\r\n")
+            received.set()
+            await reader.read()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        task = asyncio.create_task(
+            ping("127.0.0.1", server.sockets[0].getsockname()[1])
+        )
+        waiter = asyncio.create_task(received.wait())
+        try:
+            await asyncio.wait(
+                {task, waiter}, timeout=5, return_when=asyncio.FIRST_COMPLETED
+            )
+            assert not task.done(), task.result()
+            assert received.is_set()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            waiter.cancel()
+            task.cancel()
+            await asyncio.gather(task, waiter, return_exceptions=True)
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())

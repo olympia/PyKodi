@@ -496,7 +496,13 @@ class Kodi:
             response = await self._server.JSONRPC.Ping()
             return cast(bool, response == "pong")
         except jsonrpc_base.jsonrpc.TransportError as error:
-            if "401" in str(error):
+            # jsonrpc_async reports a non-200 reply as "...: HTTP <status> <reason>",
+            # unless raise_for_status makes aiohttp raise the 401 itself
+            wrapped = error.args[1] if len(error.args) > 1 else None
+            if str(error.args[0]).partition(": ")[2].startswith("HTTP 401 ") or (
+                isinstance(wrapped, aiohttp.ClientResponseError)
+                and wrapped.status == 401
+            ):
                 raise InvalidAuthError from error
             else:
                 raise CannotConnectError from error

@@ -2,15 +2,24 @@
 
 import asyncio
 import base64
+import errno
+import socket
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 import warnings
 
 import aiohttp
 from aiohttp import web
+from aiohttp.abc import AbstractResolver
 import pytest
 
-from pykodi import Kodi, get_kodi_connection
+from pykodi import (
+    CannotConnectError,
+    InvalidAuthError,
+    Kodi,
+    TransportError,
+    get_kodi_connection,
+)
 
 
 def basic(credentials: str) -> str:
@@ -121,3 +130,115 @@ def test_missing_password_in_image_url() -> None:
     assert connection.thumbnail_url("image://cover.jpg/").startswith(
         "http://kodi:@kodi:8080/image/"
     )
+
+
+class NoHosts(AbstractResolver):
+    """Resolver that finds no host, without asking DNS."""
+
+    async def resolve(
+        self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET
+    ) -> List[Any]:
+        raise OSError(f"{host} not found")
+
+    async def close(self) -> None:
+        pass
+
+
+async def ping(
+    host: str,
+    port: int,
+    raise_for_status: bool = False,
+    resolver: Optional[AbstractResolver] = None,
+) -> None:
+    """Ping over HTTP with a new session."""
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(resolver=resolver),
+        raise_for_status=raise_for_status,
+    ) as session:
+        connection = get_kodi_connection(
+            host, port, None, "kodi", "secret", session=session
+        )
+        await Kodi(connection).ping()
+
+
+def ping_with_status(
+    status: int, reason: Optional[str] = None, raise_for_status: bool = False
+) -> None:
+    """Ping a server that answers with the given status."""
+
+    async def jsonrpc(request: web.Request) -> web.Response:
+        return web.Response(status=status, reason=reason)
+
+    async def run() -> None:
+        app = web.Application()
+        app.router.add_post("/jsonrpc", jsonrpc)
+        runner = await start_server(app)
+        try:
+            await ping("127.0.0.1", runner.addresses[0][1], raise_for_status)
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+def assert_status(
+    error: pytest.ExceptionInfo[Exception], status: int, raise_for_status: bool
+) -> None:
+    """Assert the status that the TransportError behind the error reports."""
+    cause = error.value.__cause__
+    assert isinstance(cause, TransportError)
+    args = cause.args
+    if raise_for_status:
+        assert args[1].status == status
+    else:
+        assert f": HTTP {status} " in args[0]
+
+
+@pytest.mark.parametrize("reason", [None, ""])
+@pytest.mark.parametrize("raise_for_status", [False, True])
+def test_http_rejected_credentials(
+    reason: Optional[str], raise_for_status: bool
+) -> None:
+    with pytest.raises(InvalidAuthError) as error:
+        ping_with_status(401, reason, raise_for_status)
+    assert_status(error, 401, raise_for_status)
+
+
+@pytest.mark.parametrize("status", [403, 407, 500])
+@pytest.mark.parametrize("raise_for_status", [False, True])
+def test_http_error_status(status: int, raise_for_status: bool) -> None:
+    with pytest.raises(CannotConnectError) as error:
+        ping_with_status(status, raise_for_status=raise_for_status)
+    assert_status(error, status, raise_for_status)
+
+
+def test_http_server_error_with_401_in_reason() -> None:
+    with pytest.raises(CannotConnectError) as error:
+        ping_with_status(502, reason="Upstream: HTTP 401 Unauthorized")
+    assert "HTTP 401" in str(error.value.__cause__)
+
+
+def test_refused_connection_on_port_with_401() -> None:
+    for port in range(4010, 4020):
+        with socket.socket() as blocker:
+            try:
+                blocker.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            # Bound without listen(): the port refuses connections and stays taken
+            with pytest.raises(CannotConnectError) as error:
+                asyncio.run(ping("127.0.0.1", port))
+            cause = error.value.__cause__
+            assert isinstance(cause, TransportError)
+            assert "401" in str(cause)
+            wrapped = cause.args[1]
+            assert isinstance(wrapped, aiohttp.ClientConnectorError)
+            assert wrapped.os_error.errno == errno.ECONNREFUSED
+            return
+    pytest.skip("no free port between 4010 and 4019")
+
+
+def test_unknown_host_with_401() -> None:
+    with pytest.raises(CannotConnectError) as error:
+        asyncio.run(ping("kodi401.invalid", 8080, resolver=NoHosts()))
+    assert "kodi401.invalid not found" in str(error.value.__cause__)
